@@ -26,7 +26,6 @@ int Server::CreateAndBind()
 	}
 
 	int sockOpt = 1;
-	setsockopt(m_ServerSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&sockOpt, sizeof(sockOpt));
 
 	m_ServerAddress.sin_family = AF_INET;
 	m_ServerAddress.sin_port = htons(20000);
@@ -94,7 +93,7 @@ int Server::ListenAndAccept()
 int Server::Recieve()
 {
 	printf("Recieving...\n");
-	char buffer[256];
+	char buffer[BUFFER_SIZE];
 	while (true)
 	{
 		TIMEVAL tWait; tWait.tv_sec = 1; tWait.tv_usec = 0;
@@ -129,6 +128,7 @@ int Server::Recieve()
 				printf("Message: %s\n\n", buffer);
 			}
 		}
+		Send();
 	}
 
 	for (SOCKET cliSocket : m_ClientSockets)
@@ -136,5 +136,29 @@ int Server::Recieve()
 		closesocket(cliSocket);
 	}
 	closesocket(m_ServerSocket);
+	return 0;
+}
+
+int Server::Send()
+{
+	// write to a socket ---- SEND MESSAGE
+	char buffer[BUFFER_SIZE];
+
+	//while (true)
+	//{
+		printf("Enter a message to send: \n");
+		std::cin.getline(buffer, (static_cast<std::streamsize>(BUFFER_SIZE) - 1));
+
+		for (SOCKET cliSocket : m_ClientSockets)
+		{
+			int status = send(cliSocket, buffer, strlen(buffer), 0);
+			if (status == SOCKET_ERROR)
+			{
+				printf("Error in send(). Error code: %d\n", WSAGetLastError());
+				break;
+			}
+		}
+	//}
+
 	return 0;
 }

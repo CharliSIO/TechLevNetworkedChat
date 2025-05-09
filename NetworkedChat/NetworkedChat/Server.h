@@ -7,6 +7,8 @@
 #include <thread>
 #include <mutex>
 
+constexpr int BUFFER_SIZE = 256;
+
 class Server
 {
 public:

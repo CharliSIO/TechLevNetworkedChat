@@ -1,5 +1,5 @@
 #pragma once
-#include "Server.h"
+#include "Client.h"
 
 bool InitWSA();
 
@@ -7,10 +7,8 @@ bool InitWSA();
 int main()
 {
 	InitWSA();
-	
-	Server gServer;
-	if (gServer.ListenAndAccept() == -1) return -1;
-	if (gServer.Recieve() == -1) return -1;
+	Client Client1;
+	Client1.Send();
 
 	int pause = 0;
 	std::cin >> pause;
@@ -40,3 +38,4 @@ bool InitWSA()
 
 	return true;
 }
+

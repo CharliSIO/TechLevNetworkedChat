@@ -7,6 +7,19 @@ Server::Server()
 
 Server::~Server()
 {
+	if (m_ListenThread.joinable())
+	{
+		m_ListenThread.join();
+	}
+	if (m_RecieveThread.joinable())
+	{
+		m_RecieveThread.join();
+	}
+	if (m_SendThread.joinable())
+	{
+		m_SendThread.join();
+	}
+
 	for (SOCKET cliSocket : m_ClientSockets)
 	{
 		closesocket(cliSocket);
@@ -40,6 +53,11 @@ int Server::CreateAndBind()
 		return -1;
 	}
 
+	// Create thread for listening and accepting new clients
+	m_ListenThread = std::thread(&Server::ListenAndAccept, this);
+	m_RecieveThread = std::thread(&Server::Recieve, this);
+	m_SendThread = std::thread(&Server::Send, this);
+
 	return 0;
 }
 
@@ -48,7 +66,6 @@ int Server::ListenAndAccept()
 	while (m_AcceptingNewClients)
 	{
 		int iClients = 0;
-		printf("Listening...\n");
 		int status = listen(m_ServerSocket, 5);
 		if (status == SOCKET_ERROR)
 		{
@@ -62,14 +79,11 @@ int Server::ListenAndAccept()
 		int iNumSocksReady = 0; int iCount = 0;
 		while (iNumSocksReady == 0)
 		{
-			printf("\rTime waiting for connection: %i", iCount);
-			iCount++;
 			fd_set readSet; FD_ZERO(&readSet); // initialise readSet
 			FD_SET(m_ServerSocket, &readSet); // add serverSocket to readSet
 			iNumSocksReady = select(0, &readSet, NULL, NULL, &tWait); // run selected ONLY on readSet 
 		}
 
-		printf("Accepting...");
 		for (int i = iNumSocksReady; i > 0; i--)
 		{
 			sockaddr_in cliAddress;
@@ -82,9 +96,8 @@ int Server::ListenAndAccept()
 				return -1;
 			}
 			m_ClientSockets.push_back(std::move(cliSocket));
+			m_MessageBuffer.Push("Client connected!\n\n");
 		}
-
-		m_AcceptingNewClients = m_ClientSockets.size() < 3.0f;
 	}
 
 	return 0;
@@ -92,8 +105,8 @@ int Server::ListenAndAccept()
 
 int Server::Recieve()
 {
-	printf("Recieving...\n");
 	char buffer[BUFFER_SIZE];
+
 	while (true)
 	{
 		TIMEVAL tWait; tWait.tv_sec = 1; tWait.tv_usec = 0;
@@ -102,8 +115,6 @@ int Server::Recieve()
 
 		while (iNumSocksReady == 0)
 		{
-			printf("\rWaiting for a message... Total time waiting: %i", iCount);
-			iCount++;
 			FD_ZERO(&readSet);
 			for (SOCKET cliSocket : m_ClientSockets)
 			{
@@ -111,7 +122,7 @@ int Server::Recieve()
 			}
 			iNumSocksReady = select(0, &readSet, NULL, NULL, &tWait);
 		}
-		printf("\n");
+		//printf("\n");
 
 		for (SOCKET cliSocket : m_ClientSockets)
 		{
@@ -125,10 +136,9 @@ int Server::Recieve()
 				}
 
 				buffer[rcv] = '\0';
-				printf("Message: %s\n\n", buffer);
+				m_MessageBuffer.Push(("Message: %s\n\n", buffer));
 			}
 		}
-		Send();
 	}
 
 	for (SOCKET cliSocket : m_ClientSockets)
@@ -144,21 +154,25 @@ int Server::Send()
 	// write to a socket ---- SEND MESSAGE
 	char buffer[BUFFER_SIZE];
 
-	//while (true)
-	//{
-		printf("Enter a message to send: \n");
-		std::cin.getline(buffer, (static_cast<std::streamsize>(BUFFER_SIZE) - 1));
+	while (true)
+	{
+		std::string message = "";
 
-		for (SOCKET cliSocket : m_ClientSockets)
+		if (m_MessageBuffer.BlockPop(message))
 		{
-			int status = send(cliSocket, buffer, strlen(buffer), 0);
-			if (status == SOCKET_ERROR)
+			strcpy_s(buffer, message.c_str());
+
+			for (SOCKET cliSocket : m_ClientSockets)
 			{
-				printf("Error in send(). Error code: %d\n", WSAGetLastError());
-				break;
+				int status = send(cliSocket, buffer, strlen(buffer), 0);
+				if (status == SOCKET_ERROR)
+				{
+					printf("Error in send(). Error code: %d\n", WSAGetLastError());
+					break;
+				}
 			}
 		}
-	//}
+	}
 
 	return 0;
 }

@@ -25,6 +25,9 @@ protected:
 	sockaddr_in m_Address; 
 	sockaddr_in m_RecieveAddress;
 
+	std::thread m_RecieveThread;
+	std::thread m_SendThread;
+
 	const int m_BufferSize = 256;
 };
 

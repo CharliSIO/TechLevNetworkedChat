@@ -7,7 +7,17 @@ Client::Client()
 
 Client::~Client()
 {
+    if (m_RecieveThread.joinable()) m_RecieveThread.join();
+    if (m_SendThread.joinable()) m_SendThread.join();
+
     closesocket(m_Socket);
+    WSACleanup();
+}
+
+void Client::Join()
+{
+    if (m_RecieveThread.joinable()) m_RecieveThread.join();
+    if (m_SendThread.joinable()) m_SendThread.join();
 }
 
 int Client::CreateAndConnect()
@@ -48,12 +58,15 @@ int Client::CreateAndConnect()
 int Client::Send()
 {
     // write to a socket ---- SEND MESSAGE
-    char buffer[BUFFER_SIZE];
+    char buffer[sizeof(Message)];
+    Message mMessage;
 
-    while (true)
+    while (!m_ShouldQuit)
     {
         printf("Enter a message to send: \n");
-        std::cin.getline(buffer, (static_cast<std::streamsize>(BUFFER_SIZE) - 1)); 
+        std::cin.getline(mMessage.m_Message, (static_cast<std::streamsize>(BUFFER_SIZE - 1))); 
+
+        SerialiseMessage(mMessage, buffer);
 
         int status = send(m_Socket, buffer, strlen(buffer), 0);
         if (status == SOCKET_ERROR)
@@ -67,8 +80,8 @@ int Client::Send()
 
 int Client::Recieve()
 {
-    char buffer[BUFFER_SIZE];
-    while (true)
+    char buffer[sizeof(Message)];
+    while (!m_ShouldQuit)
     {
         TIMEVAL tWait; tWait.tv_sec = 1; tWait.tv_usec = 0;
         int iNumSocksReady = 0; int iCount = 0;
@@ -81,21 +94,36 @@ int Client::Recieve()
             FD_SET(m_Socket, &readSet);
             iNumSocksReady = select(0, &readSet, NULL, NULL, &tWait);
         }
-        printf("\n");
 
         if (FD_ISSET(m_Socket, &readSet))
         {
-            int rcv = recv(m_Socket, buffer, BUFFER_SIZE - 1, 0);
+            int rcv = recv(m_Socket, buffer, sizeof(Message), 0);
             if (rcv == SOCKET_ERROR)
             {
                 printf("Error in recv(). Error code: %d\n", WSAGetLastError());
                 continue;
             }
 
-            buffer[rcv] = '\0';
-            printf("Message: %s\n\n", buffer);
+            Message message = Deserialise(buffer);
+            message.m_Message[rcv] = '\0';
+
+            std::string str = message.m_Message;
+
+            if (str == "CMD_QUIT")
+            {
+                if (shutdown(m_Socket, SD_BOTH) == SOCKET_ERROR)
+                {
+                    printf("Error in shutdown(). Error code: %d\n", WSAGetLastError());
+                    continue;
+                }
+                closesocket(m_Socket);
+                printf("Quit Successfully.");
+                m_ShouldQuit = true;
+            }
+            else printf("%c: %s\n", message.m_ID, message.m_Message);
         }
     }
 
     return 0;
 }
+

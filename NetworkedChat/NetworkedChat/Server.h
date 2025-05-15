@@ -6,9 +6,16 @@
 #include <stdio.h>
 #include <vector>
 #include <thread>
+#include <algorithm>
 #include "ThreadSafeQueue.h"
 
 constexpr int BUFFER_SIZE = 256;
+
+struct Message
+{
+	char m_Message[BUFFER_SIZE];
+	char m_ID;
+};
 
 class Server
 {
@@ -18,27 +25,41 @@ public:
 
 	int CreateAndBind();
 	int ListenAndAccept();
-	int Select();
 	int Recieve();
-	void PrintMessage();
 	int Send();
+	
+	void GetCommand(Message _msg, SOCKET _cliSock);
+
+	static void SerialiseMessage(Message _msg, char _output[])
+	{
+		memcpy(_output, &_msg, sizeof(Message));
+	}
+	static Message Deserialise(char _buff[])
+	{
+		Message msg;
+		memcpy(&msg, _buff, sizeof(Message));
+		return msg;
+	}
 
 protected:
 	SOCKET m_ServerSocket;
 	sockaddr_in m_ServerAddress;
 
 	std::vector<SOCKET> m_ClientSockets;
-	//ThreadSafeQueue<SOCKET> m_ClientSockets;
+	std::mutex m_ClientsMutex;
 
 	std::thread m_ListenThread;
-	std::mutex m_ListenMutex;
 
 	std::thread m_RecieveThread;
 
 	std::thread m_SendThread;
 
-	ThreadSafeQueue<std::string> m_MessageBuffer;
+	ThreadSafeQueue<Message> m_MessageBuffer;
 
+	std::vector<Message> m_SecretMessages;
+	std::mutex m_SecretMutex;
+
+	std::atomic_int m_NextClientID;
 
 	bool m_AcceptingNewClients = true;
 };

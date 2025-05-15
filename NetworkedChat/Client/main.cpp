@@ -3,15 +3,13 @@
 
 bool InitWSA();
 
-// Working through exercises - split into classes etc
 int main()
 {
 	InitWSA();
 	Client Client1;
-	Client1.Send();
-
-	int pause = 0;
-	std::cin >> pause;
+	
+	Client1.Join();
+	
 	WSACleanup();
 	return 0;
 }

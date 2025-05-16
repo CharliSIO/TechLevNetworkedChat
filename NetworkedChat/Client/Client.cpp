@@ -48,7 +48,6 @@ int Client::CreateAndConnect()
         printf("Error in connect(). Error code: %d\n", WSAGetLastError());
         return -1;
     }
-
     m_RecieveThread = std::thread(&Client::Recieve, this);
     m_SendThread = std::thread(&Client::Send, this);
 
@@ -65,6 +64,7 @@ int Client::Send()
     {
         printf("Enter a message to send: \n");
         std::cin.getline(mMessage.m_Message, (static_cast<std::streamsize>(BUFFER_SIZE - 1))); 
+        mMessage.m_ID = m_ID;
 
         SerialiseMessage(mMessage, buffer);
 
@@ -97,15 +97,27 @@ int Client::Recieve()
 
         if (FD_ISSET(m_Socket, &readSet))
         {
-            int rcv = recv(m_Socket, buffer, sizeof(Message), 0);
+            int rcv = recv(m_Socket, buffer, sizeof(buffer), 0);
+            if (rcv == 0)
+            {
+                break;
+            }
             if (rcv == SOCKET_ERROR)
             {
                 printf("Error in recv(). Error code: %d\n", WSAGetLastError());
-                continue;
+                if (shutdown(m_Socket, SD_BOTH) == SOCKET_ERROR)
+                {
+                    printf("Error in shutdown(). Error code: %d\n", WSAGetLastError());
+                    continue;
+                }
+                closesocket(m_Socket);
+                printf("Quit Successfully. Press [ENTER] to close window. ");
+                m_ShouldQuit = true;
+                return -1;
             }
 
             Message message = Deserialise(buffer);
-            message.m_Message[rcv] = '\0';
+            message.m_Message[(rcv - 2)] = '\0';
 
             std::string str = message.m_Message;
 
@@ -117,13 +129,17 @@ int Client::Recieve()
                     continue;
                 }
                 closesocket(m_Socket);
-                printf("Quit Successfully.");
+                printf("Quit Successfully. Press [ENTER] to close window. ");
                 m_ShouldQuit = true;
+            }
+            else if (str == "CMD_ID")
+            {
+                m_ID = message.m_ID;
+                std::cout << m_ID << std::endl;
             }
             else printf("%c: %s\n", message.m_ID, message.m_Message);
         }
     }
-
     return 0;
 }
 

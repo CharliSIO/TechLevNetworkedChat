@@ -11,6 +11,8 @@ int main()
 	Server gServer;
 	if (gServer.ListenAndAccept() == -1) return -1;
 	if (gServer.Recieve() == -1) return -1;
+	
+	gServer.Join();
 
 	int pause = 0;
 	std::cin >> pause;

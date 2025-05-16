@@ -12,8 +12,8 @@ constexpr int BUFFER_SIZE = 256;
 
 struct Message
 {
-	char m_Message[BUFFER_SIZE];
 	char m_ID;
+	char m_Message[BUFFER_SIZE];
 };
 
 class Client

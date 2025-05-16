@@ -13,8 +13,8 @@ constexpr int BUFFER_SIZE = 256;
 
 struct Message
 {
-	char m_Message[BUFFER_SIZE];
 	char m_ID;
+	char m_Message[BUFFER_SIZE];
 };
 
 class Server
@@ -22,13 +22,16 @@ class Server
 public:
 	Server();
 	~Server();
+	void Join();
 
 	int CreateAndBind();
 	int ListenAndAccept();
 	int Recieve();
 	int Send();
+
+
 	
-	void GetCommand(Message _msg, SOCKET _cliSock);
+	int GetCommand(Message _msg, SOCKET _cliSock);
 
 	static void SerialiseMessage(Message _msg, char _output[])
 	{
@@ -62,5 +65,7 @@ protected:
 	std::atomic_int m_NextClientID;
 
 	bool m_AcceptingNewClients = true;
+
+	std::atomic_bool m_ShouldQuit = false;
 };
 

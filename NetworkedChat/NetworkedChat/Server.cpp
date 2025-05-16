@@ -19,12 +19,15 @@ Server::~Server()
 	{
 		m_SendThread.join();
 	}
-
-	for (SOCKET cliSocket : m_ClientSockets)
-	{
-		closesocket(cliSocket);
-	}
 	closesocket(m_ServerSocket);
+	WSACleanup();
+}
+
+void Server::Join()
+{
+	if (m_ListenThread.joinable()) m_ListenThread.join();
+	if (m_RecieveThread.joinable()) m_RecieveThread.join();
+	if (m_SendThread.joinable()) m_SendThread.join();
 }
 
 int Server::CreateAndBind()
@@ -37,8 +40,6 @@ int Server::CreateAndBind()
 		WSACleanup();
 		return -1;
 	}
-
-	int sockOpt = 1;
 
 	m_ServerAddress.sin_family = AF_INET;
 	m_ServerAddress.sin_port = htons(20000);
@@ -53,6 +54,11 @@ int Server::CreateAndBind()
 		return -1;
 	}
 
+	char strAddr[16];
+	//sockaddr_in serverAddrIn = (sockaddr_in*)
+	inet_ntop(AF_INET, &(m_ServerAddress.sin_addr), strAddr, sizeof(strAddr));
+	printf("Server IPv4 address: %s\n", strAddr);
+
 	// Create thread for listening and accepting new clients
 	m_ListenThread = std::thread(&Server::ListenAndAccept, this);
 	m_RecieveThread = std::thread(&Server::Recieve, this);
@@ -63,21 +69,20 @@ int Server::CreateAndBind()
 
 int Server::ListenAndAccept()
 {
-	while (m_AcceptingNewClients)
+	while (m_AcceptingNewClients && !m_ShouldQuit)
 	{
 		int iClients = 0;
 		int status = listen(m_ServerSocket, 5);
 		if (status == SOCKET_ERROR)
 		{
 			printf("Error in listen(). Error code: %d\n", WSAGetLastError());
-			WSACleanup();
 			return -1;
 		}
 
 		// -- SELECT FOR MULTIPLE CLIENTS
 		TIMEVAL tWait; tWait.tv_sec = 1; tWait.tv_usec = 0;
 		int iNumSocksReady = 0; int iCount = 0;
-		while (iNumSocksReady == 0)
+		while ( !m_ShouldQuit && iNumSocksReady == 0)
 		{
 			fd_set readSet; FD_ZERO(&readSet); // initialise readSet
 			FD_SET(m_ServerSocket, &readSet); // add serverSocket to readSet
@@ -88,23 +93,41 @@ int Server::ListenAndAccept()
 		{
 			sockaddr_in cliAddress;
 			int addressLength = sizeof(cliAddress);
+			if (m_ShouldQuit) return -1;
 			SOCKET cliSocket = accept(m_ServerSocket, (sockaddr*)&cliAddress, &addressLength);
 			if (cliSocket == INVALID_SOCKET)
 			{
+				if (m_ShouldQuit) return -1;
 				printf("Error in accept(). Error code: %d\n", WSAGetLastError());
-				WSACleanup();
 				return -1;
 			}
 
 			std::unique_lock<std::mutex> uniqueLock(m_ClientsMutex);
 			m_ClientSockets.push_back(std::move(cliSocket));
+
+			char idbuffer[sizeof(Message)];
+			Message idmessage;
+
+			idmessage.m_ID = (char)(m_ClientSockets.size() + 48);
 			uniqueLock.unlock();
+
+			strcpy_s(idmessage.m_Message, "CMD_ID");
+			SerialiseMessage(idmessage, idbuffer);
+
+			int status = send(cliSocket, idbuffer, sizeof(Message), 0);
+			if (status == SOCKET_ERROR)
+			{
+				printf("Error in send(). Error code: %d\n", WSAGetLastError());
+			}
 
 			char strAddr[16];
 			inet_ntop(AF_INET, &cliAddress.sin_addr, strAddr, sizeof(strAddr));
 			printf("Connection established with client at %s\n", strAddr);
 
-			Message message; strcpy_s(message.m_Message, "Client connected!\n\n");
+			char buffer[sizeof(Message)];
+			Message message; message.m_ID = '0';
+			strcpy_s(message.m_Message, "Client connected!\n\n");
+			m_MessageBuffer.Push(message);
 		}
 	}
 
@@ -115,7 +138,7 @@ int Server::Recieve()
 {
 	char buffer[sizeof(Message)];
 
-	while (true)
+	while (!m_ShouldQuit)
 	{
 		TIMEVAL tWait; tWait.tv_sec = 1; tWait.tv_usec = 0;
 		int iNumSocksReady = 0; int iCount = 0;
@@ -163,20 +186,24 @@ int Server::Recieve()
 				}
 				
 				Message message = Deserialise(buffer);
-				message.m_Message[rcv] = '\0';
-				if (message.m_Message[0] == '/') GetCommand(message, *cliSocket);
+				message.m_Message[rcv - 2] = '\0';
+				if (message.m_Message[0] == '/')
+				{
+					if (GetCommand(message, *cliSocket) == -1)
+					{
+						if (m_ShouldQuit)
+						{
+							uniqueLock.unlock(); return 0;
+						}
+						else break;
+					}
+				}
 				else m_MessageBuffer.Push(message);
 			}
 			cliSocket++;
 		}
 		uniqueLock.unlock();
 	}
-
-	for (SOCKET cliSocket : m_ClientSockets)
-	{
-		closesocket(cliSocket);
-	}
-	closesocket(m_ServerSocket);
 	return 0;
 }
 
@@ -185,7 +212,7 @@ int Server::Send()
 	// write to a socket ---- SEND MESSAGE
 	char buffer[sizeof(Message)];
 
-	while (true)
+	while (!m_ShouldQuit)
 	{
 		Message message;
 
@@ -196,7 +223,7 @@ int Server::Send()
 			std::unique_lock<std::mutex> uniqueLock(m_ClientsMutex);
 			for (SOCKET cliSocket : m_ClientSockets)
 			{
-				int status = send(cliSocket, buffer, strlen(buffer), 0);
+				int status = send(cliSocket, buffer, sizeof(buffer), 0);
 				if (status == SOCKET_ERROR)
 				{
 					printf("Error in send(). Error code: %d\n", WSAGetLastError());
@@ -210,7 +237,7 @@ int Server::Send()
 	return 0;
 }
 
-void Server::GetCommand(Message _msg, SOCKET _cliSock)
+int Server::GetCommand(Message _msg, SOCKET _cliSock)
 {
 	std::string message = _msg.m_Message;
 
@@ -226,7 +253,7 @@ void Server::GetCommand(Message _msg, SOCKET _cliSock)
 		strcpy_s(_msg.m_Message, message.c_str());
 		SerialiseMessage(_msg, buffer);
 
-		int status = send(_cliSock, buffer, strlen(buffer), 0);
+		int status = send(_cliSock, buffer, sizeof(buffer), 0);
 		if (status == SOCKET_ERROR)
 		{
 			printf("Error in send(). Error code: %d\n", WSAGetLastError());
@@ -244,7 +271,7 @@ void Server::GetCommand(Message _msg, SOCKET _cliSock)
 		strcpy_s(serverResponse.m_Message, "Your secret is safe... for now :)");
 		SerialiseMessage(serverResponse, buffer);
 
-		int status = send(_cliSock, buffer, strlen(buffer), 0);
+		int status = send(_cliSock, buffer, sizeof(buffer), 0);
 		if (status == SOCKET_ERROR)
 		{
 			printf("Error in send(). Error code: %d\n", WSAGetLastError());
@@ -259,7 +286,7 @@ void Server::GetCommand(Message _msg, SOCKET _cliSock)
 		char buffer[sizeof(Message)];
 		SerialiseMessage(*secret, buffer);
 
-		int status = send(_cliSock, buffer, strlen(buffer), 0);
+		int status = send(_cliSock, buffer, sizeof(buffer), 0);
 		if (status == SOCKET_ERROR)
 		{
 			printf("Error in send(). Error code: %d\n", WSAGetLastError());
@@ -268,27 +295,58 @@ void Server::GetCommand(Message _msg, SOCKET _cliSock)
 	else if (command == "/QUIT")
 	{
 		char buffer[sizeof(Message)];
+
 		strcpy_s(_msg.m_Message, "CMD_QUIT");
 		SerialiseMessage(_msg, buffer);
 
-		int status = send(_cliSock, buffer, strlen(buffer), 0);
+		int status = send(_cliSock, buffer, sizeof(buffer), 0);
 		if (status == SOCKET_ERROR)
 		{
 			printf("Error in send(). Error code: %d\n", WSAGetLastError());
 		}
 
+		for (auto cliSocket = m_ClientSockets.begin(); cliSocket != m_ClientSockets.end();)
+		{
+			if (_cliSock == *cliSocket)
+			{
+				// client has disconnected
+				if (shutdown(_cliSock, SD_BOTH) == SOCKET_ERROR)
+				{
+					printf("Error in shutdown(). Error code: %d\n", WSAGetLastError());
+				}
+				closesocket(_cliSock);
+				cliSocket = m_ClientSockets.erase(cliSocket);
+				continue;
+			}
+			cliSocket++;
+		}
 		Message serverResponse;
 		sprintf_s(serverResponse.m_Message, sizeof(serverResponse.m_Message), "Client %c is disconnecting...", _msg.m_ID);
 		SerialiseMessage(serverResponse, buffer);
 
-		std::unique_lock<std::mutex> uniqueLock(m_ClientsMutex);
-		for (SOCKET cliSocket : m_ClientSockets)
+		if (m_ClientSockets.size() > 0)
 		{
-			if (send(cliSocket, buffer, strlen(buffer), 0) == SOCKET_ERROR)
+			for (auto cliSocket = m_ClientSockets.begin(); cliSocket != m_ClientSockets.end();)
 			{
-				printf("Error in send(). Error code: %d\n", WSAGetLastError());
+				int status = send(*cliSocket, buffer, sizeof(buffer), 0);
+				if (status == SOCKET_ERROR)
+				{
+					printf("Error in send(). Error code: %d\n", WSAGetLastError());
+					break;
+				}
+				cliSocket++;
 			}
 		}
-		uniqueLock.unlock();
+		else
+		{
+			m_AcceptingNewClients = false;
+			m_ShouldQuit = true;
+			m_MessageBuffer.UnblockAll();
+			printf("No clients connecting, closing applicaton...\n");
+			closesocket(m_ServerSocket);
+			printf("Server shut Successfully.");
+		}
+		return -1;
 	}
+	return 1;
 }

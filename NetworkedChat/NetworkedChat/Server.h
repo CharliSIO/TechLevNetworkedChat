@@ -48,7 +48,8 @@ protected:
 	SOCKET m_ServerSocket;
 	sockaddr_in m_ServerAddress;
 
-	std::vector<SOCKET> m_ClientSockets;
+	char m_NextID = '1';
+	std::vector<std::pair<char, SOCKET>> m_ClientSockets;
 	std::mutex m_ClientsMutex;
 
 	std::thread m_ListenThread;
@@ -61,8 +62,6 @@ protected:
 
 	std::vector<Message> m_SecretMessages;
 	std::mutex m_SecretMutex;
-
-	std::atomic_int m_NextClientID;
 
 	bool m_AcceptingNewClients = true;
 

@@ -14,12 +14,14 @@ Client::~Client()
     WSACleanup();
 }
 
+// join threads
 void Client::Join()
 {
     if (m_RecieveThread.joinable()) m_RecieveThread.join();
     if (m_SendThread.joinable()) m_SendThread.join();
 }
 
+// create socket and connect to server
 int Client::CreateAndConnect()
 {
     m_Socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -40,7 +42,7 @@ int Client::CreateAndConnect()
     std::cout << "Enter server IP address: " << std::endl;
     std::cin.getline(addr, sizeof(addr));
 
-    InetPtonA(AF_INET, addr, &m_RecieveAddress.sin_addr);
+    InetPtonA(AF_INET, addr, &m_RecieveAddress.sin_addr); // convert text to IPv4 to connect to server
 
     int status = connect(m_Socket, (sockaddr*)&m_RecieveAddress, sizeof(m_RecieveAddress));
     if (status == SOCKET_ERROR)
@@ -54,6 +56,7 @@ int Client::CreateAndConnect()
     return 0;
 }
 
+// get client's message and send it to server
 int Client::Send()
 {
     // write to a socket ---- SEND MESSAGE
@@ -66,7 +69,7 @@ int Client::Send()
         std::cin.getline(mMessage.m_Message, (static_cast<std::streamsize>(BUFFER_SIZE - 1))); 
         mMessage.m_ID = m_ID;
 
-        SerialiseMessage(mMessage, buffer);
+        SerialiseMessage(mMessage, buffer); // serialise ID + text message
 
         int status = send(m_Socket, buffer, strlen(buffer), 0);
         if (status == SOCKET_ERROR)
@@ -78,6 +81,7 @@ int Client::Send()
     return 0;
 }
 
+// recieve messages from server, check if command has been called
 int Client::Recieve()
 {
     char buffer[sizeof(Message)];
@@ -117,10 +121,12 @@ int Client::Recieve()
             }
 
             Message message = Deserialise(buffer);
-            message.m_Message[(rcv - 2)] = '\0';
+            if (rcv > BUFFER_SIZE) message.m_Message[(rcv - 2)] = '\0';
+            else message.m_Message[(rcv - 1)] = '\0';
 
             std::string str = message.m_Message;
 
+            // if client is being told to quit then close sockets and shut down
             if (str == "CMD_QUIT")
             {
                 if (shutdown(m_Socket, SD_BOTH) == SOCKET_ERROR)
@@ -132,12 +138,11 @@ int Client::Recieve()
                 printf("Quit Successfully. Press [ENTER] to close window. ");
                 m_ShouldQuit = true;
             }
-            else if (str == "CMD_ID")
+            else if (str == "CMD_ID") // if being told to change id, change it
             {
                 m_ID = message.m_ID;
-                std::cout << m_ID << std::endl;
             }
-            else printf("%c: %s\n", message.m_ID, message.m_Message);
+            else printf("%c: %s\n", message.m_ID, message.m_Message); // print the message
         }
     }
     return 0;
